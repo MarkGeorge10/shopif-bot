@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-py"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String   @id @default(uuid())
+  email              String   @unique
+  hashed_password    String
+  trial_start_date   DateTime @default(now())
+  trial_ends_at      DateTime
+  is_pro             Boolean  @default(false)
+  stripe_customer_id String?  @unique
+
+  stores       Store[]
+  subscription Subscription?
+  chatSessions ChatSession[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Store {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  name                     String  @default("My Store")
+  slug                     String  @unique
+  shopify_domain           String
+  shopify_storefront_token String
+  shopify_admin_token      String
+  is_active                Boolean @default(true)
+
+  chatSessions ChatSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Subscription {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  stripe_subscription_id String   @unique
+  status                 String // e.g. "active", "canceled", "past_due"
+  current_period_end     DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model WebhookLog {
+  id           String    @id @default(uuid())
+  topic        String
+  shop_domain  String
+  payload_hash String
+  status       String    @default("received")
+  received_at  DateTime  @default(now())
+  processed_at DateTime?
+}
+
+model ChatSession {
+  id       String  @id @default(uuid())
+  userId   String
+  user     User    @relation(fields: [userId], references: [id])
+  store_id String?
+  store    Store?  @relation(fields: [store_id], references: [id])
+  title    String?
+  messages Json    @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([store_id])
+}

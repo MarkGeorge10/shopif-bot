@@ -1,0 +1,89 @@
+# Walkthrough — Shopify + AI Backbone Enhancement
+
+## What Changed
+
+The FastAPI backend now fully owns all Shopify GraphQL calls and Gemini AI chatbot logic. The frontend no longer needs to make direct Shopify or Gemini API calls.
+
+---
+
+## New Architecture
+
+```mermaid
+graph LR
+    subgraph Frontend
+        A[Next.js]
+    end
+    subgraph Backend
+        B[FastAPI] --> C[Cart Router]
+        B --> D[Chat Router]
+        B --> E[Webhook Router]
+        D --> F[Orchestrator]
+        F --> G[Gemini 2.0 Flash]
+        F --> H[Tool Registry]
+        H --> I[Shopify Tools]
+        C --> J[Shopify GraphQL Client]
+        I --> J
+        E --> K[WebhookLog DB]
+    end
+    A --> B
+    J --> L[Shopify Storefront/Admin API]
+```
+
+---
+
+## Files Created / Modified
+
+| File | Action | Purpose |
+|---|---|---|
+| [schema.prisma](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/prisma/schema.prisma) | MODIFIED | Added `is_active` to Store, new [WebhookLog](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/schemas/webhooks.py#6-16) + [ChatSession](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/models/chat_session.py#28-51) models |
+| [config.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/core/config.py) | MODIFIED | Added `GEMINI_API_KEY`, `SHOPIFY_API_VERSION`, `SHOPIFY_CLIENT_SECRET` |
+| [requirements.txt](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/requirements.txt) | MODIFIED | Added `google-genai`, `tenacity`, `bcrypt` |
+| [exceptions.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/core/exceptions.py) | NEW | [ShopifyAPIError](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/core/exceptions.py#4-11), [ShopifyRateLimitError](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/core/exceptions.py#13-20), [ShopifyConnectionInactiveError](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/core/exceptions.py#22-28) |
+| [client.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/services/shopify/client.py) | NEW | Async GraphQL executor with retry on 429, structured logging |
+| [connection.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/services/shopify/connection.py) | NEW | Tenant-safe shop connection loader |
+| [cart.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/api/endpoints/cart.py) | NEW | 5 REST endpoints: create/add/update/remove/get |
+| [webhooks.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/api/endpoints/webhooks.py) | NEW | HMAC-verified webhook handler + `app/uninstalled` |
+| [tool_registry.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/services/ai/tool_registry.py) | NEW | 10 Gemini function declarations + dispatch |
+| [tools_shopify.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/services/ai/tools_shopify.py) | NEW | All tool implementations (search, details, cart, orders, etc.) |
+| [orchestrator.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/services/ai/orchestrator.py) | NEW | Full AI pipeline: history → system prompt → Gemini → tool loop → persist |
+| [chat.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/api/endpoints/chat.py) | NEW | Chat API: send, list sessions, get session, delete |
+| [main.py](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge-backend/app/main.py) | MODIFIED | Registered 3 new routers, added structured logging |
+
+---
+
+## API Endpoints Summary
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/cart/create` | JWT + Trial | Create Storefront cart |
+| POST | `/api/cart/add` | JWT + Trial | Add line item |
+| POST | `/api/cart/update` | JWT + Trial | Update quantity |
+| POST | `/api/cart/remove` | JWT + Trial | Remove line item |
+| GET | `/api/cart/{cart_id}` | JWT + Trial | Get cart summary |
+| POST | `/api/webhooks/shopify` | HMAC | Shopify webhook receiver |
+| POST | `/api/chat/send` | JWT + Trial | Send message to AI |
+| GET | `/api/chat/sessions` | JWT + Trial | List chat sessions |
+| GET | `/api/chat/sessions/{id}` | JWT + Trial | Get session details |
+| DELETE | `/api/chat/sessions/{id}` | JWT + Trial | Delete session |
+
+---
+
+## Test Results
+
+```
+13 passed in 0.08s
+```
+
+- **4 HMAC tests**: valid signature, tampered body, wrong secret, empty body
+- **9 schema tests**: cart create defaults, required fields, valid constructions
+- **3 client tests**: success path, 429 rate limit, GraphQL error handling
+
+---
+
+## Next Steps for You
+
+1. **Run `prisma generate` then `prisma db push`** to apply the schema changes to your Supabase DB
+2. **Set `GEMINI_API_KEY`** in [.env](file:///d:/Work/Archive%20work/upwork-freelancer/prototype/shopify-ai-concierge/.env) with your actual Google AI API key
+3. **Set `SHOPIFY_CLIENT_SECRET`** if you want webhook HMAC verification (from Shopify Partner Dashboard)
+4. **Install new deps**: `pip install -r requirements.txt`
+5. **Register webhook URL** in Shopify: `https://your-backend/api/webhooks/shopify` for `app/uninstalled`
