@@ -35,7 +35,13 @@ model Store {
   shopify_admin_token      String
   is_active                Boolean @default(true)
 
+  // Enhanced Search (Pinecone RAG) Toggles
+  enhanced_search_enabled Boolean   @default(false)
+  rag_index_status        String    @default("idle") // idle, building, ready, error
+  rag_last_indexed_at     DateTime?
+
   chatSessions ChatSession[]
+  searchLogs   SearchLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -57,13 +63,19 @@ model Subscription {
 }
 
 model WebhookLog {
-  id           String    @id @default(uuid())
-  topic        String
-  shop_domain  String
+  id          String @id @default(uuid())
+  topic       String
+  shop_domain String
+
+  // Idempotency fields
+  webhook_id   String? @unique // Shopify provides X-Shopify-Webhook-Id
   payload_hash String
+  reference_id String? // e.g. product_id for granular deduplication
+
   status       String    @default("received")
   received_at  DateTime  @default(now())
   processed_at DateTime?
+  error_msg    String?
 }
 
 model ChatSession {
@@ -80,4 +92,24 @@ model ChatSession {
 
   @@index([userId])
   @@index([store_id])
+}
+
+model SearchLog {
+  id               String   @id @default(cuid())
+  storeId          String
+  store            Store    @relation(fields: [storeId], references: [id])
+  sessionId        String?
+  query            String?
+  hasImage         Boolean  @default(false)
+  provider         String // "pinecone" | "shopify_native" | "hybrid"
+  resultsCount     Int
+  pineconeScores   Float[] // top match scores from Pinecone
+  fallbackUsed     Boolean  @default(false)
+  latencyMs        Int
+  userFeedback     Int? // null | 1 (thumbs up) | -1 (thumbs down)
+  clickedProductId String?
+  createdAt        DateTime @default(now())
+
+  @@index([storeId])
+  @@index([createdAt])
 }

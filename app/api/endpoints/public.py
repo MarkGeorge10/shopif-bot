@@ -34,13 +34,13 @@ router = APIRouter()
 
 # ── Reuse product parsing from products module ───────────────────────────────
 from app.api.endpoints.products import (
-    _PRODUCT_FIELDS,
     _parse_products,
     _parse_page_info,
     ProductSearchResponse,
     CollectionsResponse,
     CollectionItem,
 )
+from app.services.shopify import repository
 
 _PAGE_SIZE = 12
 
@@ -71,24 +71,7 @@ async def public_search_products(
     after: str | None = Query(None),
 ):
     client = await get_shop_connection_by_slug(slug)
-
-    after_arg = f', after: "{after}"' if after else ""
-    query_filter = f', query: "{q} available_for_sale:true"' if q.strip() else ""
-
-    gql = f"""
-    query searchProducts {{
-      products(first: {_PAGE_SIZE}{after_arg}{query_filter}) {{
-        pageInfo {{ hasNextPage endCursor }}
-        edges {{
-          node {{
-            {_PRODUCT_FIELDS}
-          }}
-        }}
-      }}
-    }}
-    """
-    data = await client.execute_storefront(gql)
-    products_data = data.get("products", {})
+    products_data = await repository.storefront_search_products(client, query=q, first=_PAGE_SIZE, after=after)
     return ProductSearchResponse(
         products=_parse_products(products_data.get("edges", [])),
         page_info=_parse_page_info(products_data.get("pageInfo", {})),
@@ -98,17 +81,10 @@ async def public_search_products(
 @router.get("/{slug}/collections", response_model=CollectionsResponse)
 async def public_list_collections(slug: str):
     client = await get_shop_connection_by_slug(slug)
-    gql = """
-    query getCollections {
-      collections(first: 20) {
-        edges { node { id title handle } }
-      }
-    }
-    """
-    data = await client.execute_storefront(gql)
+    collections_data = await repository.storefront_list_collections(client)
     collections = [
         CollectionItem(id=e["node"]["id"], title=e["node"]["title"], handle=e["node"]["handle"])
-        for e in data.get("collections", {}).get("edges", [])
+        for e in collections_data.get("edges", [])
     ]
     return CollectionsResponse(collections=collections)
 
@@ -116,23 +92,8 @@ async def public_list_collections(slug: str):
 @router.get("/{slug}/collections/{collection_id:path}", response_model=ProductSearchResponse)
 async def public_collection_products(slug: str, collection_id: str, after: str | None = Query(None)):
     client = await get_shop_connection_by_slug(slug)
-    after_arg = f', after: "{after}"' if after else ""
-    gql = f"""
-    query getCollectionProducts($id: ID!) {{
-      collection(id: $id) {{
-        products(first: {_PAGE_SIZE}{after_arg}, filters: {{ available: true }}) {{
-          pageInfo {{ hasNextPage endCursor }}
-          edges {{
-            node {{
-              {_PRODUCT_FIELDS}
-            }}
-          }}
-        }}
-      }}
-    }}
-    """
-    data = await client.execute_storefront(gql, {"id": collection_id})
-    products_data = data.get("collection", {}).get("products", {})
+    collection = await repository.storefront_collection_products(client, collection_id, first=_PAGE_SIZE, after=after)
+    products_data = collection.get("products", {})
     return ProductSearchResponse(
         products=_parse_products(products_data.get("edges", [])),
         page_info=_parse_page_info(products_data.get("pageInfo", {})),
@@ -142,20 +103,70 @@ async def public_collection_products(slug: str, collection_id: str, after: str |
 @router.get("/{slug}/product/{product_id:path}")
 async def public_product_details(slug: str, product_id: str):
     client = await get_shop_connection_by_slug(slug)
-    gql = f"""
-    query getProductDetails($id: ID) {{
-      product(id: $id) {{
-        {_PRODUCT_FIELDS}
-        vendor
-        productType
-      }}
-    }}
-    """
-    data = await client.execute_storefront(gql, {"id": product_id})
-    product = data.get("product")
+    product = await repository.storefront_product_details(client, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return product
+
+from fastapi import File, UploadFile, Form
+import os
+
+@router.post("/{slug}/search/image", response_model=ProductSearchResponse)
+async def public_visual_search(
+    slug: str,
+    image: UploadFile = File(...),
+    q: str | None = Form(None)
+):
+    """
+    Public visual search endpoint.
+    Accepts an uploaded image and an optional text query.
+    Returns composite multimodal search results from Pinecone.
+    """
+    from app.services.search.providers import PineconeSearchProvider
+    
+    store = await prisma.store.find_unique(where={"slug": slug})
+    if not store or not store.is_active:
+        raise HTTPException(status_code=404, detail="Store not found")
+        
+    if not store.enhanced_search_enabled:
+        raise HTTPException(status_code=400, detail="Enhanced visual search is not enabled for this store.")
+
+    # 1. Store image temporarily
+    tmp_dir = "/tmp/shopify_ai_images"
+    os.makedirs(tmp_dir, exist_ok=True)
+    file_path = os.path.join(tmp_dir, f"{uuid.uuid4()}_{image.filename}")
+    
+    try:
+        content = await image.read()
+        with open(file_path, "wb") as f:
+            f.write(content)
+            
+        # 2. Execute Multimodal Search
+        client = await get_shop_connection_by_slug(slug)
+        provider = PineconeSearchProvider()
+        
+        products = await provider.search(
+            store_id=store.id,
+            client=client,
+            query=q,
+            image_bytes=content,
+            constraints={}
+        )
+        
+        return ProductSearchResponse(
+            products=products,
+            page_info={"has_next_page": False, "end_cursor": None}
+        )
+        
+    except Exception as e:
+        logger.error(f"Visual search failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process visual search.")
+        
+    finally:
+        # 3. Cleanup temp file
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
 
 
 # ── Chat ─────────────────────────────────────────────────────────────────────

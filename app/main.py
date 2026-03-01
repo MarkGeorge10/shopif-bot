@@ -17,6 +17,8 @@ logging.basicConfig(
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
 )
 
+from app.services.vector_db.pinecone_client import pinecone_client
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Connect to the database on startup
@@ -25,6 +27,13 @@ async def lifespan(app: FastAPI):
         logger.info("Connected to Prisma database.")
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")
+        
+    # Initialize Pinecone
+    try:
+        pinecone_client.initialize()
+    except Exception as e:
+        logger.error(f"Failed to initialize Pinecone: {e}")
+
     
     yield
     

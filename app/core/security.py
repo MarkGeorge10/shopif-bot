@@ -3,10 +3,7 @@ import base64
 from typing import Any, Union
 from jose import jwt
 import bcrypt
-from cryptography.fernet import Fernet
 from app.core.config import settings
-
-fernet = Fernet(settings.FERNET_SECRET_KEY)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
@@ -24,10 +21,4 @@ def create_access_token(subject: Union[str, Any], expires_delta: timedelta = Non
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
-def encrypt_token(token: str) -> str:
-    """Encrypts a string (e.g. Shopify Token) for DB storage"""
-    return fernet.encrypt(token.encode()).decode()
 
-def decrypt_token(encrypted_token: str) -> str:
-    """Decrypts a string from DB storage"""
-    return fernet.decrypt(encrypted_token.encode()).decode()

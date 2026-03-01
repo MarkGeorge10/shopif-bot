@@ -13,12 +13,12 @@ import re
 import uuid
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from prisma.models import User
 
 from app.api.deps import get_current_active_user
-from app.core.security import encrypt_token
+from app.core.crypto import encrypt_token
 from app.core.database import prisma
 
 logger = logging.getLogger("api.store")
@@ -39,6 +39,7 @@ class StoreUpdateInput(BaseModel):
     shopify_domain: str | None = None
     shopify_storefront_token: str | None = None
     shopify_admin_token: str | None = None
+    enhanced_search_enabled: bool | None = None
 
 
 class StoreResponse(BaseModel):
@@ -48,6 +49,8 @@ class StoreResponse(BaseModel):
     shopify_domain: str
     is_active: bool
     public_url: str = ""
+    enhanced_search_enabled: bool = False
+    rag_index_status: str | None = None
 
     class Config:
         from_attributes = True
@@ -73,6 +76,8 @@ def _make_response(store, app_url: str = "") -> dict:
         "shopify_domain": store.shopify_domain,
         "is_active": store.is_active,
         "public_url": f"/s/{store.slug}",
+        "enhanced_search_enabled": store.enhanced_search_enabled,
+        "rag_index_status": store.rag_index_status,
     }
 
 
@@ -215,3 +220,184 @@ async def get_policies(
     """
     data = await client.execute_storefront(gql)
     return data.get("shop", {})
+
+@router.post("/{store_id}/enhanced-search/enable")
+async def enable_enhanced_search(
+    store_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Enable Pinecone RAG search and kick off indexing."""
+    store = await prisma.store.find_first(
+        where={"id": store_id, "userId": current_user.id}
+    )
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    # Update state to building
+    store = await prisma.store.update(
+        where={"id": store.id},
+        data={
+            "enhanced_search_enabled": True,
+            "rag_index_status": "building"
+        }
+    )
+
+    from app.services.rag.indexer import _index_store_products_async
+    background_tasks.add_task(_index_store_products_async, store.id)
+
+    return {"enabled": True, "status": "building", "task_id": "fastapi-background"}
+
+
+@router.post("/{store_id}/enhanced-search/disable")
+async def disable_enhanced_search(
+    store_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Disable Pinecone RAG search instantly."""
+    store = await prisma.store.find_first(
+        where={"id": store_id, "userId": current_user.id}
+    )
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    store = await prisma.store.update(
+        where={"id": store.id},
+        data={
+            "enhanced_search_enabled": False,
+            "rag_index_status": "idle"
+        }
+    )
+
+    return {"enabled": False, "status": "idle"}
+
+
+@router.get("/{store_id}/enhanced-search/status")
+async def get_enhanced_search_status(
+    store_id: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Poll RAG index status."""
+    store = await prisma.store.find_first(
+        where={"id": store_id, "userId": current_user.id}
+    )
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    return {
+        "enhanced_search_enabled": store.enhanced_search_enabled,
+        "rag_index_status": store.rag_index_status,
+        "rag_last_indexed_at": store.rag_last_indexed_at.isoformat() if store.rag_last_indexed_at else None
+    }
+
+
+@router.post("/{store_id}/enhanced-search/reindex")
+async def trigger_reindex(
+    store_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Admin dashboard trigger to completely resync a Store's RAG representations."""
+    store = await prisma.store.find_first(
+        where={"id": store_id, "userId": current_user.id}
+    )
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+        
+    # Set to building 
+    store = await prisma.store.update(
+        where={"id": store.id},
+        data={
+            "rag_index_status": "building"
+        }
+    )
+
+    from app.services.rag.indexer import _index_store_products_async
+    
+    background_tasks.add_task(_index_store_products_async, store.id)
+    
+    return {"status": "enqueued", "task_id": "fastapi-background"}
+
+
+# ── RAG Monitoring & Evaluation Endpoints ─────────────────────────────────────
+
+@router.get("/{store_id}/rag/metrics")
+async def get_rag_metrics(
+    store_id: str,
+    days: int = 7,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Return aggregate RAG performance metrics for the admin dashboard."""
+    store = await prisma.store.find_first(where={"id": store_id, "userId": current_user.id})
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    
+    from app.services.rag.evaluator import compute_store_metrics
+    return await compute_store_metrics(store_id=store_id, days=days)
+
+
+@router.get("/{store_id}/rag/logs")
+async def get_rag_logs(
+    store_id: str,
+    limit: int = 50,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Return recent search logs for a store (most recent first)."""
+    store = await prisma.store.find_first(where={"id": store_id, "userId": current_user.id})
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    logs = await prisma.searchlog.find_many(
+        where={"storeId": store_id},
+        order={"createdAt": "desc"},
+        take=limit,
+    )
+    return [
+        {
+            "id": l.id,
+            "query": l.query,
+            "has_image": l.hasImage,
+            "provider": l.provider,
+            "results_count": l.resultsCount,
+            "pinecone_top_score": l.pineconeScores[0] if l.pineconeScores else None,
+            "fallback_used": l.fallbackUsed,
+            "latency_ms": l.latencyMs,
+            "user_feedback": l.userFeedback,
+            "clicked_product_id": l.clickedProductId,
+            "created_at": l.createdAt.isoformat(),
+        }
+        for l in logs
+    ]
+
+
+class FeedbackInput(BaseModel):
+    search_log_id: str
+    feedback: int  # 1 = thumbs up, -1 = thumbs down
+    clicked_product_id: str | None = None
+
+
+@router.post("/{store_id}/rag/feedback")
+async def submit_rag_feedback(
+    store_id: str,
+    body: FeedbackInput,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Record a user's thumbs up/down on a search result."""
+    if body.feedback not in (1, -1):
+        raise HTTPException(status_code=422, detail="feedback must be 1 or -1")
+
+    log = await prisma.searchlog.find_first(
+        where={"id": body.search_log_id, "storeId": store_id}
+    )
+    if not log:
+        raise HTTPException(status_code=404, detail="Search log not found")
+
+    updated = await prisma.searchlog.update(
+        where={"id": log.id},
+        data={
+            "userFeedback": body.feedback,
+            "clickedProductId": body.clicked_product_id,
+        },
+    )
+    return {"ok": True, "search_log_id": updated.id}
+

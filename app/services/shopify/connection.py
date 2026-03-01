@@ -9,7 +9,6 @@ import logging
 from fastapi import HTTPException, status
 
 from app.core.database import prisma
-from app.core.security import decrypt_token
 from app.services.shopify.client import ShopifyGraphQLClient
 
 logger = logging.getLogger("shopify.connection")
@@ -109,8 +108,8 @@ async def get_shop_connection_by_slug(slug: str) -> ShopifyGraphQLClient:
 
 def _build_client(store) -> ShopifyGraphQLClient:
     """Decrypt tokens and build a ShopifyGraphQLClient."""
-    storefront_token = decrypt_token(store.shopify_storefront_token)
-    admin_token = decrypt_token(store.shopify_admin_token)
+    storefront_token = store.shopify_storefront_token
+    admin_token = store.shopify_admin_token
 
     logger.info(
         "shop_connection_loaded",

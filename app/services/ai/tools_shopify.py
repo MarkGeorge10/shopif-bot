@@ -94,31 +94,89 @@ async def tool_search_products(
     query: str = "",
     **kwargs,
 ) -> dict[str, Any]:
-    """Search the Shopify catalog for products."""
-    gql = f"""
-    query searchProducts($query: String!, $first: Int!) {{
-      products(first: $first, query: $query) {{
-        pageInfo {{ hasNextPage endCursor }}
-        edges {{
-          node {{
-            {_PRODUCT_FIELDS}
-          }}
-        }}
-      }}
-    }}
-    """
-    data = await client.execute_storefront(
-        gql, {"query": f"{query} available_for_sale:true", "first": 12}
-    )
-    products_data = data.get("products", {})
-    products = _parse_products(products_data.get("edges", []))
+    """Search the Shopify catalog for products. Supports constraints mapping for enhanced search engines."""
+    from app.core.database import prisma
+    from app.services.search.providers import ShopifyNativeSearchProvider, PineconeSearchProvider
     
+    # 1. Look up the Store to determine the search engine
+    store = None
+    if client.store_id:
+        store = await prisma.store.find_unique(where={"id": client.store_id})
+        
+    enhanced = store.enhanced_search_enabled if store else False
+    image_bytes = kwargs.get("image_bytes")
+    
+    # 2. Select Provider
+    products = []
+    
+    if enhanced:
+        constraints = kwargs.get("constraints", {})
+        try:
+            # Try Pinecone first
+            pinecone_provider = PineconeSearchProvider()
+            products = await pinecone_provider.search(
+                store_id=client.store_id, 
+                client=client, 
+                query=query, 
+                image_bytes=image_bytes,
+                constraints=constraints
+            )
+            
+            # Fallback condition: 
+            # If we didn't get results AND it's a text-only query, OR the index is still building
+            if (len(products) == 0 or store.rag_index_status != "ready") and not image_bytes:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Pinecone returned {len(products)} results (Status: {store.rag_index_status}). Falling back to native search.")
+                
+                native_provider = ShopifyNativeSearchProvider()
+                native_products = await native_provider.search(
+                    store_id=client.store_id, 
+                    client=client, 
+                    query=query, 
+                    image_bytes=None,
+                    constraints={}
+                )
+                
+                if len(products) == 0:
+                    products = native_products
+                else:
+                    seen = {p.get("id") for p in products if p.get("id")}
+                    for np in native_products:
+                        if np.get("id") not in seen:
+                            products.append(np)
+                            seen.add(np.get("id"))
+                            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Pinecone search failed ({e}). Falling back to native search.")
+            if not image_bytes:
+                native_provider = ShopifyNativeSearchProvider()
+                products = await native_provider.search(
+                    store_id=client.store_id, 
+                    client=client, 
+                    query=query, 
+                    image_bytes=None,
+                    constraints={}
+                )
+    else:
+        native_provider = ShopifyNativeSearchProvider()
+        products = await native_provider.search(
+            store_id=client.store_id, 
+            client=client, 
+            query=query, 
+            image_bytes=None,
+            constraints={}
+        )
+    
+    # We no longer rely strictly on pageInfo for vector searches, but we keep the schema stable
     return {
         "productsFound": len(products), 
         "products": products,
         "page_info": {
-            "has_next_page": products_data.get("pageInfo", {}).get("hasNextPage", False),
-            "end_cursor": products_data.get("pageInfo", {}).get("endCursor"),
+            "has_next_page": False,
+            "end_cursor": None,
         }
     }
 

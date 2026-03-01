@@ -22,15 +22,51 @@ logger = logging.getLogger("ai.tool_registry")
 SEARCH_PRODUCTS = {
     "name": "search_products",
     "description": (
-        "Search the Shopify catalog for products using keywords and filters. "
-        'Use this for general discovery like "Find red running shoes under $120".'
+        "Search the Shopify catalog for products using keywords and optional filters. "
+        'Use this for general discovery like "Find red running shoes under $120". '
+        "When the user specifies a price range, brand, stock requirement, or product category, "
+        "pass them as structured constraints instead of embedding them in the query string."
     ),
     "parameters": {
         "type": Type.OBJECT,
         "properties": {
             "query": {
                 "type": Type.STRING,
-                "description": 'Keywords to search for (e.g., "waterproof boots").',
+                "description": 'Keywords to search for (e.g., "waterproof boots"). '
+                               "Do NOT put price or brand information here if you are also using constraints.",
+            },
+            "constraints": {
+                "type": Type.OBJECT,
+                "description": (
+                    "Optional structured filters to narrow the search. "
+                    "Only populate fields that the user explicitly mentioned."
+                ),
+                "properties": {
+                    "price_min": {
+                        "type": Type.NUMBER,
+                        "description": "Minimum price (inclusive), in the store's currency.",
+                    },
+                    "price_max": {
+                        "type": Type.NUMBER,
+                        "description": "Maximum price (inclusive), in the store's currency.",
+                    },
+                    "in_stock": {
+                        "type": Type.BOOLEAN,
+                        "description": "If true, only return products that are currently in stock.",
+                    },
+                    "vendor": {
+                        "type": Type.STRING,
+                        "description": "Filter by brand or vendor name (exact match).",
+                    },
+                    "product_type": {
+                        "type": Type.STRING,
+                        "description": "Filter by product category/type (e.g., 'Shoes', 'T-Shirts').",
+                    },
+                    "tags": {
+                        "type": Type.STRING,
+                        "description": "Comma-separated list of tags to filter by (e.g., 'sale,summer').",
+                    },
+                },
             },
         },
         "required": ["query"],

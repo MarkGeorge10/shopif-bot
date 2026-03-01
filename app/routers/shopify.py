@@ -20,9 +20,8 @@ from app.services.shopify_service import (
     generate_state,
     verify_hmac,
     exchange_code_for_token,
-    encrypt_token,
-    decrypt_token,
 )
+from app.core.crypto import encrypt_token
 from app.config import get_settings
 
 router = APIRouter(prefix="/shopify", tags=["Shopify"])

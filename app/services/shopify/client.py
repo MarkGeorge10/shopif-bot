@@ -51,10 +51,19 @@ class ShopifyGraphQLClient:
         admin_token: str = "",
         api_version: str | None = None,
     ):
+        from app.core.crypto import decrypt_token
+        
         self.shop_domain = shop_domain
         self.store_id = store_id
-        self.storefront_token = storefront_token
-        self.admin_token = admin_token
+        
+        # 1) Decrypt tokens ONCE during initialization
+        self.storefront_token = decrypt_token(storefront_token)
+        self.admin_token = decrypt_token(admin_token)
+        
+        # Validate and Log for requested debugging step
+        if self.admin_token:
+            logger.info("Admin token decrypted successfully (len=%d)", len(self.admin_token))
+            
         self.api_version = api_version or settings.SHOPIFY_API_VERSION
 
     # ── Public methods ────────────────────────────────────────────────────
@@ -63,7 +72,8 @@ class ShopifyGraphQLClient:
         self, query: str, variables: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """Execute a query against the Shopify Storefront API."""
-        url = f"https://{self.shop_domain}.myshopify.com/api/{self.api_version}/graphql.json"
+        base_domain = self.shop_domain if self.shop_domain.endswith(".myshopify.com") else f"{self.shop_domain}.myshopify.com"
+        url = f"https://{base_domain}/api/{self.api_version}/graphql.json"
         headers = {
             "Content-Type": "application/json",
             "X-Shopify-Storefront-Access-Token": self.storefront_token,
@@ -74,7 +84,8 @@ class ShopifyGraphQLClient:
         self, query: str, variables: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """Execute a query against the Shopify Admin API."""
-        url = f"https://{self.shop_domain}/admin/api/{self.api_version}/graphql.json"
+        base_domain = self.shop_domain if self.shop_domain.endswith(".myshopify.com") else f"{self.shop_domain}.myshopify.com"
+        url = f"https://{base_domain}/admin/api/{self.api_version}/graphql.json"
         headers = {
             "Content-Type": "application/json",
             "X-Shopify-Access-Token": self.admin_token,

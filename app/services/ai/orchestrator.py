@@ -33,7 +33,12 @@ logger = logging.getLogger("ai.orchestrator")
 _MAX_TOOL_ROUNDS = 5
 
 
-def _build_system_prompt(shop_domain: str, current_page: str | None = None, shopper_email: str | None = None) -> str:
+def _build_system_prompt(
+    shop_domain: str,
+    current_page: str | None = None,
+    shopper_email: str | None = None,
+    enhanced_search_enabled: bool = False,
+) -> str:
     """Build the system instruction for Gemini, parameterized by shop."""
     base_prompt = (
         f"You are a helpful AI shopping concierge for the Shopify store: {shop_domain}.\n\n"
@@ -43,7 +48,7 @@ def _build_system_prompt(shop_domain: str, current_page: str | None = None, shop
         "1. NEVER recite or display raw Shopify IDs (like gid://shopify/ProductVariant/...) to the user. These are for internal tool use ONLY.\n"
         "2. Avoid reciting full URLs or links verbally. The ONLY link you should ever provide is the checkout link when the user is ready to pay.\n"
         "3. Keep your verbal/text responses extremely concise, conversational, and friendly.\n"
-        "4. When you trigger an action (like adding to cart, or searching), just confirm it briefly (e.g., 'I've added the white hoodie to your cart' or 'Here are some white hoodies I found'). The storefront UI will automatically update on the user's screen; you don't need to explain the UI to them.\n"
+        "4. When you trigger an action (like adding to cart, or searching), just confirm it briefly (e.g., \"I've added the white hoodie to your cart\" or \"Here are some white hoodies I found\"). The storefront UI will automatically update on the user's screen; you don't need to explain the UI to them.\n"
         "5. Do NOT invent products or data — always rely on tool responses.\n"
         "6. If the user asks for order status, use tool_get_order_status. If you lack their email, ask for it.\n"
         "7. If the user asks for recommendations, use tool_get_customer_history if they are logged in. Otherwise offer general top-sellers.\n"
@@ -52,17 +57,31 @@ def _build_system_prompt(shop_domain: str, current_page: str | None = None, shop
         "10. NEVER reply with just punctuation or empty dashes like '--'. Always use natural spoken sentences, even if short.\n"
         "11. If a search yields 0 products after retrying, concisely and politely tell the user you couldn't find exactly what they were looking for, but you are ready to help them search for something else.\n"
     )
-    
+
+    if enhanced_search_enabled:
+        base_prompt += (
+            "\nENHANCED SEARCH IS ACTIVE: This store has a semantic product index. "
+            "When calling search_products you MAY pass a structured 'constraints' object to filter results precisely. "
+            "Use it whenever the user mentions any of the following:\n"
+            "  • A price limit or range  → set price_min and/or price_max (numbers, no currency symbol)\n"
+            "  • A brand or vendor name  → set vendor (exact name as the user said it)\n"
+            "  • A product category      → set product_type\n"
+            "  • In-stock / availability → set in_stock: true\n"
+            "  • Tags or labels          → set tags as a comma-separated string\n"
+            "Always keep the 'query' field as the natural-language keyword description; "
+            "do NOT duplicate filter information inside the query string.\n"
+        )
+
     if shopper_email:
         base_prompt += f"\nIdentity Context: The current user is logged in as \"{shopper_email}\". Use this for tool_get_order_status and tool_get_customer_history.\n"
-    
+
     if current_page:
         base_prompt += (
             f"\nContext: The user is currently viewing the following page/product context: \"{current_page}\". "
             "If they say 'this product' or 'the current product', assume they mean the one on this page. "
             "You can still offer to search for other products if that is what they are looking for."
         )
-        
+
     return base_prompt
 
 
@@ -96,6 +115,13 @@ async def process_chat_message(
     # ── 1. Get shop connection ──────────────────────────────────────────────
     client = await get_active_shop_connection(user_id, store_id)
 
+    # ── 1b. Look up store settings (enhanced search flag) ──────────────────
+    enhanced_search_enabled = False
+    if client.store_id:
+        store_record = await prisma.store.find_unique(where={"id": client.store_id})
+        if store_record:
+            enhanced_search_enabled = bool(store_record.enhanced_search_enabled)
+
     # ── 2. Load or create session ───────────────────────────────────────────
     if session_id:
         session = await prisma.chatsession.find_first(
@@ -126,7 +152,12 @@ async def process_chat_message(
     chat = ai_client.chats.create(
         model="gemini-2.5-pro",
         config=types.GenerateContentConfig(
-            system_instruction=_build_system_prompt(client.shop_domain, current_page),
+            system_instruction=_build_system_prompt(
+                client.shop_domain,
+                current_page,
+                shopper_email,
+                enhanced_search_enabled,
+            ),
             tools=[types.Tool(function_declarations=get_tool_declarations())],
             temperature=0.7,
         ),

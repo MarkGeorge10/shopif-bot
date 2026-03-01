@@ -8,26 +8,11 @@ import base64
 import secrets
 
 import httpx
-from cryptography.fernet import Fernet
 
 from app.config import get_settings
+from app.core.crypto import encrypt_token, decrypt_token
 
 settings = get_settings()
-
-
-def _fernet() -> Fernet:
-    """Return a Fernet instance using the secret key from env."""
-    return Fernet(settings.fernet_secret_key.encode())
-
-
-def encrypt_token(plaintext_token: str) -> str:
-    """Encrypt a Shopify access token for database storage."""
-    return _fernet().encrypt(plaintext_token.encode()).decode()
-
-
-def decrypt_token(encrypted_token: str) -> str:
-    """Decrypt a Shopify access token retrieved from the database."""
-    return _fernet().decrypt(encrypted_token.encode()).decode()
 
 
 def build_oauth_url(shop: str, state: str) -> str:

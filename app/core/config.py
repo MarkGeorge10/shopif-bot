@@ -28,9 +28,21 @@ class Settings(BaseSettings):
     SHOPIFY_API_VERSION: str = "2026-01"
     SHOPIFY_CLIENT_SECRET: str = ""
 
+    # Pinecone
+    PINECONE_API_KEY: str = ""
+    PINECONE_INDEX_NAME: str = ""
+    PINECONE_CLOUD: str = "aws"
+    PINECONE_REGION: str = "us-east-1"
+    PINECONE_NAMESPACE_PREFIX: str = "store_"
+
     # App Settings
     APP_URL: str
     TRIAL_DAYS: int = 14
+    
+    # Celery & Redis
+    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://localhost:6379/0"
     
     # CORS
     ALLOWED_ORIGINS: str
