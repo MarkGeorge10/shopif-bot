@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     PINECONE_NAMESPACE_PREFIX: str = "store_"
 
     # App Settings
-    APP_URL: str
+    APP_URL: str = ""  # Set to Cloud Run URL after first deploy
     TRIAL_DAYS: int = 14
     
     # Celery & Redis
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     
     # CORS
-    ALLOWED_ORIGINS: str
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8000,https://shopify-ai-concierge.vercel.app"
     
     @property
     def BACKEND_CORS_ORIGINS(self) -> List[str]:

@@ -1,0 +1,21 @@
+gcloud run deploy shopify-concierge-api `
+    --image="us-central1-docker.pkg.dev/shopify-concierge-prod/shopify-concierge/backend:latest" `
+    --region="us-central1" `
+    --allow-unauthenticated `
+    --port=8000 `
+    --memory=2Gi `
+    --cpu=2 `
+    --project="shopify-concierge-prod" `
+    --set-secrets="DATABASE_URL=DATABASE_URL:latest" `
+    --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest" `
+    --set-secrets="JWT_SECRET_KEY=JWT_SECRET_KEY:latest" `
+    --set-secrets="FERNET_SECRET_KEY=FERNET_SECRET_KEY:latest" `
+    --set-secrets="STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest" `
+    --set-secrets="STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest" `
+    --set-secrets="STRIPE_PRICE_ID=STRIPE_PRICE_ID:latest" `
+    --set-secrets="PINECONE_API_KEY=PINECONE_API_KEY:latest" `
+    --set-secrets="PINECONE_INDEX_NAME=PINECONE_INDEX_NAME:latest" `
+    --set-secrets="PINECONE_CLOUD=PINECONE_CLOUD:latest" `
+    --set-secrets="PINECONE_REGION=PINECONE_REGION:latest" `
+    --set-secrets="REDIS_URL=REDIS_URL:latest" `
+    --set-secrets="CELERY_BROKER_URL=CELERY_BROKER_URL:latest"

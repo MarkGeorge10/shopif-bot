@@ -1,0 +1,129 @@
+# Cloud Build CI/CD pipeline for Shopify AI Concierge Backend
+#
+# Triggered on push to `main` branch.
+# Required substitution variables (set in Cloud Build trigger UI):
+#   _REGION              e.g. us-central1
+#   _PROJECT_ID          your GCP project ID
+#   _REPO                Artifact Registry repo name  e.g. shopify-concierge
+#   _CLOUD_SQL_INSTANCE  e.g. PROJECT_ID:us-central1:shopify-concierge-db
+#
+# Secret names in Secret Manager (referenced below):
+#   DATABASE_URL, GEMINI_API_KEY, SECRET_KEY, PINECONE_API_KEY,
+#   SHOPIFY_CLIENT_SECRET, STRIPE_SECRET_KEY, ENCRYPTION_KEY,
+#   REDIS_URL, PINECONE_INDEX_NAME, PINECONE_ENVIRONMENT
+
+substitutions:
+  _REGION: us-central1
+  _REPO: shopify-concierge
+  _IMAGE: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/backend
+
+steps:
+  # ── Step 1: Build the Docker image ─────────────────────────────────────────
+  - name: "gcr.io/cloud-builders/docker"
+    id: build
+    args:
+      - build
+      - --tag
+      - "${_IMAGE}:${SHORT_SHA}"
+      - --tag
+      - "${_IMAGE}:latest"
+      - --cache-from
+      - "${_IMAGE}:latest"
+      - .
+
+  # ── Step 2: Push to Artifact Registry ──────────────────────────────────────
+  - name: "gcr.io/cloud-builders/docker"
+    id: push
+    waitFor: [build]
+    args:
+      - push
+      - --all-tags
+      - "${_IMAGE}"
+
+  # ── Step 3: Run Prisma migrations via Cloud Run job ────────────────────────
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: migrate
+    waitFor: [push]
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - prisma-migrate
+      - --image=${_IMAGE}:${SHORT_SHA}
+      - --region=${_REGION}
+      - --execute-now
+      - --wait
+      - --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
+      - --set-secrets=DATABASE_URL=DATABASE_URL:latest
+
+  # ── Step 4: Deploy the API (Cloud Run service) ─────────────────────────────
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: deploy-api
+    waitFor: [migrate]
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - shopify-concierge-api
+      - --image=${_IMAGE}:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=8000
+      - --memory=2Gi
+      - --cpu=2
+      - --min-instances=0
+      - --max-instances=10
+      - --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
+      - >-
+        --set-secrets=DATABASE_URL=DATABASE_URL:latest,
+        GEMINI_API_KEY=GEMINI_API_KEY:latest,
+        SECRET_KEY=SECRET_KEY:latest,
+        PINECONE_API_KEY=PINECONE_API_KEY:latest,
+        PINECONE_INDEX_NAME=PINECONE_INDEX_NAME:latest,
+        PINECONE_ENVIRONMENT=PINECONE_ENVIRONMENT:latest,
+        SHOPIFY_CLIENT_SECRET=SHOPIFY_CLIENT_SECRET:latest,
+        STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,
+        ENCRYPTION_KEY=ENCRYPTION_KEY:latest,
+        REDIS_URL=REDIS_URL:latest
+
+  # ── Step 5: Deploy the Celery worker (Cloud Run service) ───────────────────
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    id: deploy-worker
+    waitFor: [migrate]
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - shopify-concierge-worker
+      - --image=${_IMAGE}:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --memory=4Gi
+      - --cpu=4
+      - --min-instances=1
+      - --max-instances=3
+      - --command=celery
+      - --args=-A,app.core.celery_app,worker,--loglevel=info,--concurrency=2
+      - --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
+      - >-
+        --set-secrets=DATABASE_URL=DATABASE_URL:latest,
+        GEMINI_API_KEY=GEMINI_API_KEY:latest,
+        SECRET_KEY=SECRET_KEY:latest,
+        PINECONE_API_KEY=PINECONE_API_KEY:latest,
+        PINECONE_INDEX_NAME=PINECONE_INDEX_NAME:latest,
+        PINECONE_ENVIRONMENT=PINECONE_ENVIRONMENT:latest,
+        SHOPIFY_CLIENT_SECRET=SHOPIFY_CLIENT_SECRET:latest,
+        STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,
+        ENCRYPTION_KEY=ENCRYPTION_KEY:latest,
+        REDIS_URL=REDIS_URL:latest
+
+images:
+  - "${_IMAGE}:${SHORT_SHA}"
+  - "${_IMAGE}:latest"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8   # faster build (torch install is slow)

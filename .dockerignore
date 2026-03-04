@@ -1,0 +1,51 @@
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+.Python
+
+# Virtual environment — never ship this
+venv/
+.venv/
+env/
+
+# Dev / local secrets — use Secret Manager in GCP
+.env
+.env.*
+*.env
+
+# Development and research notebooks
+research/
+*.ipynb
+*.resolved
+
+# Test output
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# IDE and OS
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# CI/CD artifacts
+*.log
+pip_out*.txt
+uvicorn_error*.txt
+
+# Local Docker files that shouldn't recurse
+Dockerfile*
+docker-compose*
+
+# Node (if frontend ever lives here)
+node_modules/
+.next/
