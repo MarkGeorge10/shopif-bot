@@ -1,4 +1,5 @@
 import logging
+import os
 import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -8,31 +9,41 @@ from app.core.database import prisma
 
 from app.api.endpoints import auth, store, billing, cart, webhooks, chat, products, public
 from app.core.config import settings
-
-logger = logging.getLogger(__name__)
+from app.services.vector_db.pinecone_client import pinecone_client
 
 # ── Structured logging setup ──────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
 )
+logger = logging.getLogger(__name__)
 
-from app.services.vector_db.pinecone_client import pinecone_client
+_cloud_run = bool(os.getenv("K_SERVICE"))  # set automatically by Cloud Run
+logger.info("[BOOT] API starting")
+logger.info("[BOOT] Lazy embedding enabled — model loads on first request")
+if _cloud_run:
+    logger.info("[BOOT] Cloud Run mode detected")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Connect to the database on startup
     try:
-        await prisma.connect()
+        # Connect to the database on startup with an extended timeout
+        await prisma.connect(timeout=30)
         logger.info("Connected to Prisma database.")
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")
+        logger.error(traceback.format_exc())
+        raise RuntimeError(f"FATAL: Database connection failed during startup: {e}")
         
-    # Initialize Pinecone
+    # Initialize Pinecone (non-blocking — errors are logged, not raised)
     try:
         pinecone_client.initialize()
+        logger.info("[BOOT] Pinecone client initialized")
     except Exception as e:
-        logger.error(f"Failed to initialize Pinecone: {e}")
+        logger.error(f"[BOOT] Failed to initialize Pinecone: {e}")
+
+    logger.info("[BOOT] Startup complete — listening for requests")
 
     
     yield

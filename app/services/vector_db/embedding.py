@@ -1,63 +1,159 @@
+"""
+Multimodal Embedding Service — Cloud Run / multiprocess safe.
+
+Lifecycle contract
+──────────────────
+• import time  : zero side-effects (no model download, no network I/O)
+• first call to get_embedding_model() : model is downloaded / loaded once,
+  result is cached by lru_cache for the lifetime of the process
+• DIMENSION     : resolved via get_embedding_dimension() — also lazy, cached
+
+Design notes
+────────────
+• lru_cache is process-local; each Uvicorn worker loads the model once.
+• /tmp is writable on Cloud Run; all HF libraries write there automatically.
+• The module-level `embedding_service` singleton is a cheap proxy — its
+  constructor does NOT load the model.  Call .embed_text() / .embed_image()
+  and the model is initialised on demand.
+"""
+
+from __future__ import annotations
+
 import logging
+import os
+from functools import lru_cache
 from typing import List
 
-from sentence_transformers import SentenceTransformer
-
-logger = logging.getLogger(__name__)
-
-import logging
-from typing import List
-from PIL import Image
 import numpy as np
-
-from sentence_transformers import SentenceTransformer
+from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+# ── Cloud Run writable cache — set before any HuggingFace sub-library imports ──
+_HF_BASE = os.getenv("HF_HOME", "/tmp/huggingface")
+os.environ.setdefault("HF_HOME",                    _HF_BASE)
+os.environ.setdefault("HF_HUB_CACHE",               os.path.join(_HF_BASE, "hub"))
+os.environ.setdefault("TRANSFORMERS_CACHE",          os.path.join(_HF_BASE, "transformers"))
+os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME",  "/tmp/sentence_transformers")
+
+for _d in [
+    os.environ["HF_HOME"],
+    os.environ["HF_HUB_CACHE"],
+    os.environ["TRANSFORMERS_CACHE"],
+    os.environ["SENTENCE_TRANSFORMERS_HOME"],
+]:
+    os.makedirs(_d, exist_ok=True)
+
+# ── Model selection ────────────────────────────────────────────────────────────
+# Override via env var to switch models without a code change.
+# Default: all-MiniLM-L6-v2 → 384 dims, fast, no image support.
+# For multimodal (text+image) use:  EMBED_MODEL_NAME=clip-ViT-B-32  (512 dims)
+_MODEL_NAME: str = os.getenv(
+    "EMBED_MODEL_NAME",
+    "sentence-transformers/all-MiniLM-L6-v2",
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Lazy factories — cached per process, never executed at import time
+# ─────────────────────────────────────────────────────────────────────────────
+
+@lru_cache(maxsize=1)
+def get_embedding_model():
+    """
+    Load SentenceTransformer exactly once per worker process.
+    Subsequent calls return the cached instance with no overhead.
+    """
+    # Deferred import keeps sentence_transformers out of the import graph
+    # so the module loads instantly even when the package is heavy.
+    from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+
+    logger.info(f"[EMBED] Loading model '{_MODEL_NAME}' (first request)…")
+    model = SentenceTransformer(_MODEL_NAME)
+    logger.info(
+        f"[EMBED] Model '{_MODEL_NAME}' ready — "
+        f"dim={model.get_sentence_embedding_dimension()}"
+    )
+    return model
+
+
+@lru_cache(maxsize=1)
+def get_embedding_dimension() -> int:
+    """
+    Return the vector dimension of the active embedding model.
+    Loads the model if not already loaded (same lru_cache slot).
+    """
+    return get_embedding_model().get_sentence_embedding_dimension()
+
+
+@lru_cache(maxsize=1)
+def get_embedding_service() -> "MultimodalEmbeddingService":
+    """Return the cached singleton EmbeddingService instance."""
+    return MultimodalEmbeddingService()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Service class — constructor is intentionally a no-op
+# ─────────────────────────────────────────────────────────────────────────────
 
 class MultimodalEmbeddingService:
     """
-    Phase 2: Multimodal (Text + Image) embeddings for production.
-    Uses 'clip-ViT-B-32' to map both text and images into a shared 512-dimension space.
-    Dimension: 512
-    """
-    MODEL_NAME = 'clip-ViT-B-32'
-    DIMENSION = 512
+    Thin wrapper around the cached SentenceTransformer model.
 
-    def __init__(self):
-        logger.info(f"Loading multimodal embedding model {self.MODEL_NAME}...")
-        self.model = SentenceTransformer(self.MODEL_NAME)
-        logger.info("Multimodal embedding model loaded successfully.")
+    Constructor is a no-op — safe to instantiate at module level.
+    Model loading happens on the first call to any embed_* method.
+    """
+
+    # ── DIMENSION property: resolved lazily, cached after first access ──────
+    _dimension: int | None = None
+
+    @property
+    def DIMENSION(self) -> int:
+        """
+        Vector dimension for the active model.
+        Triggers model load on first access, then caches locally.
+        """
+        if self._dimension is None:
+            self._dimension = get_embedding_dimension()
+        return self._dimension
+
+    @property
+    def model(self):
+        """Active SentenceTransformer instance (loaded on first access)."""
+        return get_embedding_model()
+
+    # ── Public embedding API ─────────────────────────────────────────────────
 
     def embed_text(self, text: str) -> List[float]:
-        """Generate a float list embedding for a single text string."""
+        """Embed a single text string → float list."""
         return self.model.encode([text])[0].astype("float32").tolist()
 
     def embed_image(self, image: Image.Image) -> List[float]:
-        """Generate a float list embedding for a PIL Image."""
+        """Embed a PIL Image → float list."""
         return self.model.encode([image])[0].astype("float32").tolist()
 
     def combine_vectors(
-        self, 
-        img_vec: List[float], 
-        txt_vec: List[float], 
-        w_img: float = 0.7, 
-        w_txt: float = 0.3
+        self,
+        img_vec: List[float],
+        txt_vec: List[float],
+        w_img: float = 0.7,
+        w_txt: float = 0.3,
     ) -> List[float]:
         """
-        Combines an image vector and text vector using weighted addition, then 
-        L2 normalizes the result so it retains parity in the cosine similarity space.
+        Weighted blend of image + text vectors, L2-normalised so cosine
+        similarity remains meaningful in the shared embedding space.
         """
         v_img = np.array(img_vec, dtype="float32")
         v_txt = np.array(txt_vec, dtype="float32")
-        
         combined = (v_img * w_img) + (v_txt * w_txt)
-        
-        # L2 Normalization
         norm = np.linalg.norm(combined)
         if norm > 0:
             combined = combined / norm
-            
         return combined.tolist()
 
-# Singleton instance for the app
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module-level singleton — safe: constructor does nothing
+# All existing call sites continue to work unchanged.
+# ─────────────────────────────────────────────────────────────────────────────
 embedding_service = MultimodalEmbeddingService()

@@ -159,7 +159,7 @@ async def process_chat_message(
                 enhanced_search_enabled,
             ),
             tools=[types.Tool(function_declarations=get_tool_declarations())],
-            temperature=0.7,
+            temperature=0.8,
         ),
         history=gemini_history,
     )
