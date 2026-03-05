@@ -46,12 +46,18 @@ for _d in [
 
 # ── Model selection ────────────────────────────────────────────────────────────
 # Override via env var to switch models without a code change.
-# Default: all-MiniLM-L6-v2 → 384 dims, fast, no image support.
-# For multimodal (text+image) use:  EMBED_MODEL_NAME=clip-ViT-B-32  (512 dims)
+# Default: clip-ViT-B-32 → 512 dims, multimodal (text + image via CLIP).
+# For text-only (no image embedding): EMBED_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2 (384 dims)
 _MODEL_NAME: str = os.getenv(
     "EMBED_MODEL_NAME",
-    "sentence-transformers/all-MiniLM-L6-v2",
+    "clip-ViT-B-32",
 )
+
+# ── Offline mode — never reach out to HuggingFace at runtime ────────────────
+# The model is pre-baked into the Docker image. Setting HF_HUB_OFFLINE=1
+# prevents any attempt to contact hub.huggingface.co (avoids 429 on cold starts).
+# Override with HF_HUB_OFFLINE=0 in local dev if you need model updates.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

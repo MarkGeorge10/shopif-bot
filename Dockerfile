@@ -19,6 +19,19 @@ COPY requirements.txt .
 RUN pip install --upgrade pip \
     && pip install --prefix=/install --no-cache-dir -r requirements.txt
 
+# ── Pre-download the embedding model at build time ──────────────────────────
+# This bakes the model into the image so Cloud Run never needs to reach
+# HuggingFace at runtime (avoids 429 rate-limits on cold starts).
+ENV SENTENCE_TRANSFORMERS_HOME=/model_cache
+RUN PYTHONPATH=/install/lib/python3.11/site-packages \
+    python -c "\
+    import os; \
+    os.makedirs('/model_cache', exist_ok=True); \
+    from sentence_transformers import SentenceTransformer; \
+    SentenceTransformer('clip-ViT-B-32', cache_folder='/model_cache'); \
+    print('Model clip-ViT-B-32 pre-downloaded successfully.') \
+    "
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Runtime image
@@ -54,13 +67,17 @@ RUN mkdir -p /app/.cache/prisma-python/binaries && \
     prisma generate && \
     chown -R appuser:appgroup /app/.cache
 
-# ── HuggingFace / SentenceTransformers — Cloud Run safe paths ──────────────────
-# All HF libraries write to /tmp which is always writable on Cloud Run.
-# Models are loaded lazily at first request — NOT during container startup.
+# ── HuggingFace / SentenceTransformers — bundled model, offline mode ───────────
+# clip-ViT-B-32 is pre-downloaded at build time into /model_cache (from builder).
+# HF_HUB_OFFLINE=1 prevents any attempt to reach hub.huggingface.co at runtime.
+# HF_HOME / HF_HUB_CACHE / TRANSFORMERS_CACHE still point to /tmp for any
+# auxiliary files the libraries may try to write at runtime.
+COPY --from=builder /model_cache /model_cache
 ENV HF_HOME=/tmp/huggingface \
     HF_HUB_CACHE=/tmp/huggingface/hub \
     TRANSFORMERS_CACHE=/tmp/huggingface/transformers \
-    SENTENCE_TRANSFORMERS_HOME=/tmp/sentence_transformers
+    SENTENCE_TRANSFORMERS_HOME=/model_cache \
+    HF_HUB_OFFLINE=1
 
 USER appuser
 
