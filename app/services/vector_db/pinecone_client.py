@@ -42,8 +42,8 @@ class PineconeClient:
     """
 
     def __init__(self) -> None:
-        self.api_key: str = settings.PINECONE_API_KEY
-        self.index_name: str = settings.PINECONE_INDEX_NAME
+        self.api_key: str = settings.PINECONE_API_KEY.strip() if settings.PINECONE_API_KEY else ""
+        self.index_name: str = settings.PINECONE_INDEX_NAME.strip() if settings.PINECONE_INDEX_NAME else ""
         self.pc: Optional[Pinecone] = None
         self.index = None
         # Dimension is resolved lazily from the embedding service — NOT here.
