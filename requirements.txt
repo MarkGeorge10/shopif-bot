@@ -44,6 +44,6 @@ sentence-transformers==3.4.1
 
 # Multimodal Embeddings & Workers (Phase 2)
 celery[redis]==5.3.6
-Pillow==10.2.0
+Pillow==12.1.1
 transformers==4.46.3
 torch>=2.0.0
