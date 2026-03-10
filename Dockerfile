@@ -24,13 +24,7 @@ RUN pip install --upgrade pip \
 # HuggingFace at runtime (avoids 429 rate-limits on cold starts).
 ENV SENTENCE_TRANSFORMERS_HOME=/model_cache
 RUN PYTHONPATH=/install/lib/python3.11/site-packages \
-    python -c "\
-    import os; \
-    os.makedirs('/model_cache', exist_ok=True); \
-    from sentence_transformers import SentenceTransformer; \
-    SentenceTransformer('clip-ViT-B-32', cache_folder='/model_cache'); \
-    print('Model clip-ViT-B-32 pre-downloaded successfully.') \
-    "
+    python -c "import os; os.makedirs('/model_cache', exist_ok=True); from sentence_transformers import SentenceTransformer; SentenceTransformer('clip-ViT-B-32', cache_folder='/model_cache'); print('Model clip-ViT-B-32 pre-downloaded successfully.')"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -58,11 +52,16 @@ COPY --from=builder /install /usr/local
 COPY . .
 
 # Create a non-root user for security
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+# Ensure they have a real home directory so tools like nodeenv/prisma don't fail
+RUN addgroup --system appgroup && \
+    adduser --system --ingroup appgroup --home /home/appuser appuser && \
+    mkdir -p /home/appuser/.cache && \
+    chown -R appuser:appgroup /home/appuser
 
 # Prisma Python downloads a query-engine binary during `prisma generate`.
 # Set PRISMA_BINARY_CACHE_DIR so it downloads into /app/.cache instead of /root/.cache
-ENV PRISMA_BINARY_CACHE_DIR=/app/.cache/prisma-python/binaries
+ENV PRISMA_BINARY_CACHE_DIR=/app/.cache/prisma-python/binaries \
+    HOME=/home/appuser
 RUN mkdir -p /app/.cache/prisma-python/binaries && \
     prisma generate && \
     chown -R appuser:appgroup /app/.cache

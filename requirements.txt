@@ -7,7 +7,7 @@ python-multipart==0.0.19
 prisma==0.15.0
 
 # Auth / Security
-python-jose[cryptography]==3.3.0
+PyJWT==2.8.0
 bcrypt==4.2.1
 cryptography==43.0.3
 
@@ -30,6 +30,7 @@ google-genai>=1.17.0
 
 # Retry logic
 tenacity==9.0.0
+
 
 # Timezone
 pytz>=2024.1

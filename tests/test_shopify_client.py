@@ -103,3 +103,68 @@ async def test_graphql_error_raises(mock_settings):
 
         with pytest.raises(ShopifyAPIError):
             await client.execute_storefront("query { nonexistent }")
+
+
+@pytest.mark.asyncio
+async def test_execute_dispatches_to_storefront(mock_settings):
+    """execute() with mode='storefront' should call the Storefront API URL."""
+    from app.services.shopify.client import ShopifyGraphQLClient
+
+    client = ShopifyGraphQLClient(
+        shop_domain="test.myshopify.com",
+        storefront_token="sf-test-token",
+        mode="storefront",
+    )
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"data": {"products": {"edges": []}}}
+    mock_response.headers = {}
+
+    with patch("httpx.AsyncClient") as MockClient:
+        instance = AsyncMock()
+        instance.post.return_value = mock_response
+        instance.__aenter__ = AsyncMock(return_value=instance)
+        instance.__aexit__ = AsyncMock(return_value=False)
+        MockClient.return_value = instance
+
+        result = await client.execute("query { products(first:1) { edges { node { id } } } }")
+
+        # Verify the Storefront URL was used (not admin path)
+        called_url = instance.post.call_args[0][0]
+        assert "/api/" in called_url
+        assert "/admin/" not in called_url
+
+    assert "products" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_dispatches_to_admin(mock_settings):
+    """execute() with mode='admin' should call the Admin API URL."""
+    from app.services.shopify.client import ShopifyGraphQLClient
+
+    client = ShopifyGraphQLClient(
+        shop_domain="test.myshopify.com",
+        admin_token="admin-test-token",
+        mode="admin",
+    )
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"data": {"orders": {"edges": []}}}
+    mock_response.headers = {}
+
+    with patch("httpx.AsyncClient") as MockClient:
+        instance = AsyncMock()
+        instance.post.return_value = mock_response
+        instance.__aenter__ = AsyncMock(return_value=instance)
+        instance.__aexit__ = AsyncMock(return_value=False)
+        MockClient.return_value = instance
+
+        result = await client.execute("query { orders(first:1) { edges { node { id } } } }")
+
+        # Verify the Admin URL was used
+        called_url = instance.post.call_args[0][0]
+        assert "/admin/api/" in called_url
+
+    assert "orders" in result

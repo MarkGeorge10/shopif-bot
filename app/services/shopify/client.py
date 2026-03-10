@@ -10,7 +10,7 @@ Features:
 import time
 import uuid
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from tenacity import (
@@ -28,17 +28,32 @@ logger = logging.getLogger("shopify.client")
 _TIMEOUT = 15.0  # seconds
 _MAX_RETRIES = 5
 
+# Literal type for the two Shopify API modes
+ShopifyClientMode = Literal["admin", "storefront"]
+
 
 class ShopifyGraphQLClient:
     """
     Async Shopify GraphQL client supporting both Admin and Storefront APIs.
 
     Usage:
+        # Storefront mode (default)
         client = ShopifyGraphQLClient(
             shop_domain="mystore.myshopify.com",
             storefront_token="sf_token",
-            admin_token="admin_token",
+            mode="storefront",
         )
+        products = await client.execute(query, variables)
+
+        # Admin mode
+        client = ShopifyGraphQLClient(
+            shop_domain="mystore.myshopify.com",
+            admin_token="admin_token",
+            mode="admin",
+        )
+        orders = await client.execute(query, variables)
+
+        # Or call the specific methods directly:
         products = await client.execute_storefront(query, variables)
         orders = await client.execute_admin(query, variables)
     """
@@ -50,23 +65,39 @@ class ShopifyGraphQLClient:
         storefront_token: str = "",
         admin_token: str = "",
         api_version: str | None = None,
+        mode: ShopifyClientMode = "storefront",
     ):
         from app.core.crypto import decrypt_token
-        
-        self.shop_domain = shop_domain
+
+        self.shop_domain = shop_domain.strip() if shop_domain else shop_domain
         self.store_id = store_id
-        
+        self.mode: ShopifyClientMode = mode
+
         # 1) Decrypt tokens ONCE during initialization
-        self.storefront_token = decrypt_token(storefront_token)
-        self.admin_token = decrypt_token(admin_token)
-        
+        self.storefront_token = decrypt_token(storefront_token).strip() if storefront_token else ""
+        self.admin_token = decrypt_token(admin_token).strip() if admin_token else ""
+
         # Validate and Log for requested debugging step
         if self.admin_token:
             logger.info("Admin token decrypted successfully (len=%d)", len(self.admin_token))
-            
+
+        logger.info("ShopifyGraphQLClient initialized (shop=%s, mode=%s)", shop_domain, mode)
         self.api_version = api_version or settings.SHOPIFY_API_VERSION
 
     # ── Public methods ────────────────────────────────────────────────────
+
+    async def execute(
+        self, query: str, variables: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """
+        Execute a GraphQL query against the API selected by ``self.mode``.
+
+        - mode="admin"      → Shopify Admin API (requires admin_token)
+        - mode="storefront" → Shopify Storefront API (requires storefront_token)
+        """
+        if self.mode == "admin":
+            return await self.execute_admin(query, variables)
+        return await self.execute_storefront(query, variables)
 
     async def execute_storefront(
         self, query: str, variables: dict[str, Any] | None = None
