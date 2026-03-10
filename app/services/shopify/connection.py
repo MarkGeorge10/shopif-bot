@@ -9,7 +9,7 @@ import logging
 from fastapi import HTTPException, status
 
 from app.core.database import prisma
-from app.services.shopify.client import ShopifyGraphQLClient
+from app.services.shopify.client import ShopifyGraphQLClient, ShopifyClientMode
 
 logger = logging.getLogger("shopify.connection")
 
@@ -17,6 +17,7 @@ logger = logging.getLogger("shopify.connection")
 async def get_active_shop_connection(
     user_id: str,
     store_id: str | None = None,
+    mode: ShopifyClientMode | None = None,
 ) -> ShopifyGraphQLClient:
     """
     Load the user's connected Shopify store and return a ready-to-use
@@ -27,12 +28,14 @@ async def get_active_shop_connection(
     - Store must be active (is_active == True)
 
     Args:
-        user_id: The authenticated user's ID
+        user_id:  The authenticated user's ID.
         store_id: Optional specific store ID. If None, loads the user's
                   first active store.
+        mode:     ``"admin"`` or ``"storefront"``. If omitted, the store's
+                  saved ``default_mode`` is used.
 
     Returns:
-        A ShopifyGraphQLClient instance with decrypted tokens.
+        A ShopifyGraphQLClient instance configured for the requested mode.
 
     Raises:
         HTTPException 404: No store connected
@@ -78,13 +81,21 @@ async def get_active_shop_connection(
             },
         )
 
-    return _build_client(store)
+    return _build_client(store, mode=mode)
 
 
-async def get_shop_connection_by_slug(slug: str) -> ShopifyGraphQLClient:
+async def get_shop_connection_by_slug(
+    slug: str,
+    mode: ShopifyClientMode | None = None,
+) -> ShopifyGraphQLClient:
     """
     Load a store by its public slug (no auth required).
     Used by public-facing endpoints.
+
+    Args:
+        slug: The store's public slug.
+        mode: ``"admin"`` or ``"storefront"``. If omitted, the store's
+              saved ``default_mode`` is used.
 
     Raises:
         HTTPException 404: Store not found or inactive
@@ -103,17 +114,22 @@ async def get_shop_connection_by_slug(slug: str) -> ShopifyGraphQLClient:
             detail={"code": "store_inactive", "message": "This store is currently unavailable."},
         )
 
-    return _build_client(store)
+    return _build_client(store, mode=mode)
 
 
-def _build_client(store) -> ShopifyGraphQLClient:
-    """Decrypt tokens and build a ShopifyGraphQLClient."""
+def _build_client(store, mode: ShopifyClientMode | None = None) -> ShopifyGraphQLClient:
+    """Decrypt tokens and build a ShopifyGraphQLClient for the given mode.
+
+    If ``mode`` is None, the store's saved ``default_mode`` value is used
+    (falls back to ``"storefront"`` if the field is absent).
+    """
+    resolved_mode: ShopifyClientMode = mode or getattr(store, "default_mode", None) or "storefront"
     storefront_token = store.shopify_storefront_token
     admin_token = store.shopify_admin_token
 
     logger.info(
         "shop_connection_loaded",
-        extra={"shop": store.shopify_domain, "slug": store.slug},
+        extra={"shop": store.shopify_domain, "slug": store.slug, "mode": resolved_mode},
     )
 
     return ShopifyGraphQLClient(
@@ -121,4 +137,5 @@ def _build_client(store) -> ShopifyGraphQLClient:
         store_id=store.id,
         storefront_token=storefront_token,
         admin_token=admin_token,
+        mode=resolved_mode,
     )

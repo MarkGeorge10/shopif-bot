@@ -8,14 +8,17 @@
 #   _CLOUD_SQL_INSTANCE  e.g. PROJECT_ID:us-central1:shopify-concierge-db
 #
 # Secret names in Secret Manager (referenced below):
-#   DATABASE_URL, GEMINI_API_KEY, SECRET_KEY, PINECONE_API_KEY,
-#   SHOPIFY_CLIENT_SECRET, STRIPE_SECRET_KEY, ENCRYPTION_KEY,
-#   REDIS_URL, PINECONE_INDEX_NAME, PINECONE_ENVIRONMENT
+#   DATABASE_URL, GEMINI_API_KEY, JWT_SECRET_KEY, PINECONE_API_KEY,
+#   PINECONE_INDEX_NAME, SHOPIFY_CLIENT_SECRET (missing, removed), STRIPE_SECRET_KEY,
+#   STRIPE_WEBHOOK_SECRET, FERNET_SECRET_KEY, REDIS_URL,
+#   STRIPE_PRICE_ID, PINECONE_CLOUD, PINECONE_REGION,
+#   ACCESS_TOKEN_EXPIRE_MINUTES, ALLOWED_ORIGINS, APP_URL,
+#   SHOPIFY_API_VERSION, TRIAL_DAYS, JWT_ALGORITHM, PINECONE_NAMESPACE_PREFIX
 
 substitutions:
   _REGION: us-central1
-  _REPO: shopify-concierge
-  _IMAGE: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/backend
+  _IMAGE: us-central1-docker.pkg.dev/shopify-concierge-prod/shopify-concierge/backend
+  _TAG: "latest"
 
 steps:
   # ── Step 1: Build the Docker image ─────────────────────────────────────────
@@ -24,7 +27,7 @@ steps:
     args:
       - build
       - --tag
-      - "${_IMAGE}:${SHORT_SHA}"
+      - "${_IMAGE}:${_TAG}"
       - --tag
       - "${_IMAGE}:latest"
       - --cache-from
@@ -40,33 +43,21 @@ steps:
       - --all-tags
       - "${_IMAGE}"
 
-  # ── Step 3: Run Prisma migrations via Cloud Run job ────────────────────────
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
-    id: migrate
-    waitFor: [push]
-    entrypoint: gcloud
-    args:
-      - run
-      - jobs
-      - update
-      - prisma-migrate
-      - --image=${_IMAGE}:${SHORT_SHA}
-      - --region=${_REGION}
-      - --execute-now
-      - --wait
-      - --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
-      - --set-secrets=DATABASE_URL=DATABASE_URL:latest
+  # Prisma migrations temporarily disabled because Cloud Run job
+  # fails due to nodeenv permission issue.
+  # Database schema is already in sync.
+  # TODO: restore migration job after Node runtime is installed in the container.
 
-  # ── Step 4: Deploy the API (Cloud Run service) ─────────────────────────────
+  # ── Step 3: Deploy the API (Cloud Run service) ─────────────────────────────
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     id: deploy-api
-    waitFor: [migrate]
+    waitFor: [push]
     entrypoint: gcloud
     args:
       - run
       - deploy
       - shopify-concierge-api
-      - --image=${_IMAGE}:${SHORT_SHA}
+      - --image=${_IMAGE}:${_TAG}
       - --region=${_REGION}
       - --platform=managed
       - --allow-unauthenticated
@@ -75,29 +66,41 @@ steps:
       - --cpu=2
       - --min-instances=0
       - --max-instances=10
-      - --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
       - >-
         --set-secrets=DATABASE_URL=DATABASE_URL:latest,
         GEMINI_API_KEY=GEMINI_API_KEY:latest,
-        SECRET_KEY=SECRET_KEY:latest,
+        JWT_SECRET_KEY=JWT_SECRET_KEY:latest,
         PINECONE_API_KEY=PINECONE_API_KEY:latest,
         PINECONE_INDEX_NAME=PINECONE_INDEX_NAME:latest,
-        PINECONE_ENVIRONMENT=PINECONE_ENVIRONMENT:latest,
-        SHOPIFY_CLIENT_SECRET=SHOPIFY_CLIENT_SECRET:latest,
         STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,
-        ENCRYPTION_KEY=ENCRYPTION_KEY:latest,
-        REDIS_URL=REDIS_URL:latest
+        STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest,
+        FERNET_SECRET_KEY=FERNET_SECRET_KEY:latest,
+        REDIS_URL=REDIS_URL:latest,
+        CELERY_BROKER_URL=REDIS_URL:latest,
+        CELERY_RESULT_BACKEND=REDIS_URL:latest,
+        STRIPE_PRICE_ID=STRIPE_PRICE_ID:latest,
+        PINECONE_CLOUD=PINECONE_CLOUD:latest,
+        PINECONE_REGION=PINECONE_REGION:latest,
+        ACCESS_TOKEN_EXPIRE_MINUTES=ACCESS_TOKEN_EXPIRE_MINUTES:latest,
+        ALLOWED_ORIGINS=ALLOWED_ORIGINS:latest,
+        APP_URL=APP_URL:latest,
+        SHOPIFY_API_VERSION=SHOPIFY_API_VERSION:latest,
+        TRIAL_DAYS=TRIAL_DAYS:latest,
+        JWT_ALGORITHM=JWT_ALGORITHM:latest,
+        PINECONE_NAMESPACE_PREFIX=PINECONE_NAMESPACE_PREFIX:latest
+      - >-
+        --set-env-vars=EMBED_MODEL_NAME=clip-ViT-B-32
 
-  # ── Step 5: Deploy the Celery worker (Cloud Run service) ───────────────────
+  # ── Step 4: Deploy the Celery worker (Cloud Run service) ───────────────────
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     id: deploy-worker
-    waitFor: [migrate]
+    waitFor: [push]
     entrypoint: gcloud
     args:
       - run
       - deploy
       - shopify-concierge-worker
-      - --image=${_IMAGE}:${SHORT_SHA}
+      - --image=${_IMAGE}:${_TAG}
       - --region=${_REGION}
       - --platform=managed
       - --no-allow-unauthenticated
@@ -105,23 +108,35 @@ steps:
       - --cpu=4
       - --min-instances=1
       - --max-instances=3
-      - --command=celery
-      - --args=-A,app.core.celery_app,worker,--loglevel=info,--concurrency=2
-      - --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
+      - --command=python
+      - --args=scripts/worker_with_health.py
       - >-
         --set-secrets=DATABASE_URL=DATABASE_URL:latest,
         GEMINI_API_KEY=GEMINI_API_KEY:latest,
-        SECRET_KEY=SECRET_KEY:latest,
+        JWT_SECRET_KEY=JWT_SECRET_KEY:latest,
         PINECONE_API_KEY=PINECONE_API_KEY:latest,
         PINECONE_INDEX_NAME=PINECONE_INDEX_NAME:latest,
-        PINECONE_ENVIRONMENT=PINECONE_ENVIRONMENT:latest,
-        SHOPIFY_CLIENT_SECRET=SHOPIFY_CLIENT_SECRET:latest,
         STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,
-        ENCRYPTION_KEY=ENCRYPTION_KEY:latest,
-        REDIS_URL=REDIS_URL:latest
+        STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest,
+        FERNET_SECRET_KEY=FERNET_SECRET_KEY:latest,
+        REDIS_URL=REDIS_URL:latest,
+        CELERY_BROKER_URL=REDIS_URL:latest,
+        CELERY_RESULT_BACKEND=REDIS_URL:latest,
+        STRIPE_PRICE_ID=STRIPE_PRICE_ID:latest,
+        PINECONE_CLOUD=PINECONE_CLOUD:latest,
+        PINECONE_REGION=PINECONE_REGION:latest,
+        ACCESS_TOKEN_EXPIRE_MINUTES=ACCESS_TOKEN_EXPIRE_MINUTES:latest,
+        ALLOWED_ORIGINS=ALLOWED_ORIGINS:latest,
+        APP_URL=APP_URL:latest,
+        SHOPIFY_API_VERSION=SHOPIFY_API_VERSION:latest,
+        TRIAL_DAYS=TRIAL_DAYS:latest,
+        JWT_ALGORITHM=JWT_ALGORITHM:latest,
+        PINECONE_NAMESPACE_PREFIX=PINECONE_NAMESPACE_PREFIX:latest
+      - >-
+        --set-env-vars=EMBED_MODEL_NAME=clip-ViT-B-32
 
 images:
-  - "${_IMAGE}:${SHORT_SHA}"
+  - "${_IMAGE}:${_TAG}"
   - "${_IMAGE}:latest"
 
 options:

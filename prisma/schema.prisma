@@ -34,6 +34,7 @@ model Store {
   shopify_storefront_token String
   shopify_admin_token      String
   is_active                Boolean @default(true)
+  default_mode             String  @default("storefront") // "storefront" | "admin"
 
   // Enhanced Search (Pinecone RAG) Toggles
   enhanced_search_enabled Boolean   @default(false)

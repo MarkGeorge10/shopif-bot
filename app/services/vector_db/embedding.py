@@ -128,11 +128,50 @@ class MultimodalEmbeddingService:
         """Active SentenceTransformer instance (loaded on first access)."""
         return get_embedding_model()
 
+    # ── CLIP token-limit constant ──────────────────────────────────────────────
+    _CLIP_MAX_TOKENS = 77
+
+    def _truncate_for_clip(self, text: str) -> str:
+        """Pre-truncate *text* so that its token count stays within CLIP's
+        77-token limit (including special tokens).
+
+        The CLIPModel in sentence-transformers v3.4.x does **not** honour
+        ``max_seq_length`` or ``truncate=True`` in ``encode()``.  We therefore
+        tokenise → truncate → decode the text ourselves using the underlying
+        CLIP processor before handing it to ``SentenceTransformer.encode()``.
+        """
+        clip_module = self.model._modules.get("0")  # CLIPModel layer
+        if clip_module is None or not hasattr(clip_module, "processor"):
+            # Fallback: crude character-level trim (≈ 4 chars per BPE token)
+            return text[: self._CLIP_MAX_TOKENS * 3]
+
+        processor = clip_module.processor
+        tokens = processor.tokenizer(
+            text,
+            truncation=True,
+            max_length=self._CLIP_MAX_TOKENS,
+            return_tensors=None,
+        )
+        return processor.tokenizer.decode(
+            tokens["input_ids"],
+            skip_special_tokens=True,
+        )
+
     # ── Public embedding API ─────────────────────────────────────────────────
 
     def embed_text(self, text: str) -> List[float]:
-        """Embed a single text string → float list."""
-        return self.model.encode([text])[0].astype("float32").tolist()
+        """Embed a single text string → float list.
+
+        CLIP has a hard limit of 77 tokens.  We pre-truncate the text so
+        that the tokenised sequence never exceeds the position-embedding
+        table and avoids a ``RuntimeError`` at forward time.
+        """
+        safe_text = self._truncate_for_clip(text)
+        return (
+            self.model.encode([safe_text])[0]
+            .astype("float32")
+            .tolist()
+        )
 
     def embed_image(self, image: Image.Image) -> List[float]:
         """Embed a PIL Image → float list."""

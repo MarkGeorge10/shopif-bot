@@ -32,6 +32,7 @@ class StoreConnectInput(BaseModel):
     shopify_storefront_token: str
     shopify_admin_token: str
     name: str = "My Store"
+    default_mode: str = "storefront"  # "storefront" | "admin"
 
 
 class StoreUpdateInput(BaseModel):
@@ -40,6 +41,7 @@ class StoreUpdateInput(BaseModel):
     shopify_storefront_token: str | None = None
     shopify_admin_token: str | None = None
     enhanced_search_enabled: bool | None = None
+    default_mode: str | None = None  # "storefront" | "admin"
 
 
 class StoreResponse(BaseModel):
@@ -48,6 +50,7 @@ class StoreResponse(BaseModel):
     slug: str
     shopify_domain: str
     is_active: bool
+    default_mode: str = "storefront"
     public_url: str = ""
     enhanced_search_enabled: bool = False
     rag_index_status: str | None = None
@@ -75,6 +78,7 @@ def _make_response(store, app_url: str = "") -> dict:
         "slug": store.slug,
         "shopify_domain": store.shopify_domain,
         "is_active": store.is_active,
+        "default_mode": store.default_mode,
         "public_url": f"/s/{store.slug}",
         "enhanced_search_enabled": store.enhanced_search_enabled,
         "rag_index_status": store.rag_index_status,
@@ -109,6 +113,7 @@ async def connect_store(
             "shopify_domain": store_in.shopify_domain,
             "shopify_storefront_token": encrypted_storefront,
             "shopify_admin_token": encrypted_admin,
+            "default_mode": store_in.default_mode,
         }
     )
 
@@ -139,7 +144,7 @@ async def get_store_config(current_user: User = Depends(get_current_active_user)
     return _make_response(store)
 
 
-@router.get("/{store_id}")
+@router.get("/{store_id}", response_model=StoreResponse)
 async def get_store(
     store_id: str,
     current_user: User = Depends(get_current_active_user),
@@ -175,6 +180,10 @@ async def update_store(
         update_data["shopify_storefront_token"] = encrypt_token(body.shopify_storefront_token)
     if body.shopify_admin_token is not None:
         update_data["shopify_admin_token"] = encrypt_token(body.shopify_admin_token)
+    if body.default_mode is not None:
+        if body.default_mode not in ("admin", "storefront"):
+            raise HTTPException(status_code=422, detail="default_mode must be 'admin' or 'storefront'")
+        update_data["default_mode"] = body.default_mode
 
     if update_data:
         store = await prisma.store.update(

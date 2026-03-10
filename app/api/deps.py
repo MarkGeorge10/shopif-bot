@@ -1,7 +1,8 @@
 from typing import Generator
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
+import jwt
+from jwt.exceptions import InvalidTokenError
 from pydantic import ValidationError
 from datetime import datetime
 
@@ -15,10 +16,10 @@ reusable_oauth2 = OAuth2PasswordBearer(
 async def get_current_user(token: str = Depends(reusable_oauth2)) -> User:
     try:
         payload = jwt.decode(
-            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+            token, settings.JWT_SECRET_KEY.strip(), algorithms=[settings.JWT_ALGORITHM.strip()]
         )
         token_data = payload.get("sub")
-    except (JWTError, ValidationError):
+    except (InvalidTokenError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",

@@ -62,8 +62,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Set all CORS enabled origins
-cors_origins = settings.BACKEND_CORS_ORIGINS or ["http://localhost:3000"]
+# Set all CORS enabled origins — read from settings, fall back to env var directly,
+# then guarantee localhost:3000 is always present for local dev.
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+cors_origins: list[str] = (
+    settings.BACKEND_CORS_ORIGINS
+    or [o.strip() for o in _raw_origins.split(",") if o.strip()]
+    or ["http://localhost:3000"]
+)
+if "http://localhost:3000" not in cors_origins:
+    cors_origins.append("http://localhost:3000")
+
+logger.info(f"[BOOT] CORS origins: {cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
