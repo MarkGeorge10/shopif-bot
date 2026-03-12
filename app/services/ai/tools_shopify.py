@@ -106,69 +106,19 @@ async def tool_search_products(
     enhanced = store.enhanced_search_enabled if store else False
     image_bytes = kwargs.get("image_bytes")
     
-    # 2. Select Provider
-    products = []
-    
-    if enhanced:
-        constraints = kwargs.get("constraints", {})
-        try:
-            # Try Pinecone first
-            pinecone_provider = PineconeSearchProvider()
-            products = await pinecone_provider.search(
-                store_id=client.store_id, 
-                client=client, 
-                query=query, 
-                image_bytes=image_bytes,
-                constraints=constraints
-            )
-            
-            # Fallback condition: 
-            # If we didn't get results AND it's a text-only query, OR the index is still building
-            if (len(products) == 0 or store.rag_index_status != "ready") and not image_bytes:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"Pinecone returned {len(products)} results (Status: {store.rag_index_status}). Falling back to native search.")
-                
-                native_provider = ShopifyNativeSearchProvider()
-                native_products = await native_provider.search(
-                    store_id=client.store_id, 
-                    client=client, 
-                    query=query, 
-                    image_bytes=None,
-                    constraints={}
-                )
-                
-                if len(products) == 0:
-                    products = native_products
-                else:
-                    seen = {p.get("id") for p in products if p.get("id")}
-                    for np in native_products:
-                        if np.get("id") not in seen:
-                            products.append(np)
-                            seen.add(np.get("id"))
-                            
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Pinecone search failed ({e}). Falling back to native search.")
-            if not image_bytes:
-                native_provider = ShopifyNativeSearchProvider()
-                products = await native_provider.search(
-                    store_id=client.store_id, 
-                    client=client, 
-                    query=query, 
-                    image_bytes=None,
-                    constraints={}
-                )
-    else:
-        native_provider = ShopifyNativeSearchProvider()
-        products = await native_provider.search(
-            store_id=client.store_id, 
-            client=client, 
-            query=query, 
-            image_bytes=None,
-            constraints={}
+    # 2. Execute Unified Search
+    from app.services.search.unified import unified_search
+    try:
+        products = await unified_search(
+            store_id=client.store_id,
+            client=client,
+            query=query,
+            image_bytes=image_bytes,
+            constraints=kwargs.get("constraints", {})
         )
+    except Exception as e:
+        logger.error(f"Unified search failed: {e}")
+        products = []
     
     # We no longer rely strictly on pageInfo for vector searches, but we keep the schema stable
     return {
@@ -389,6 +339,12 @@ async def tool_manage_cart(
     if action in ["add_lines", "remove_lines"] and not variant_id:
         return {"error": f"You must provide a variant_id to {action}."}
 
+    # Robustness: If the AI asks to add to an existing cart but we don't have a cart_id yet,
+    # fall back to creating a new cart.
+    if action == "add_lines" and not effective_cart_id:
+        logger.info("tool_manage_cart: add_lines called without cart_id, falling back to create")
+        action = "create"
+
     if action == "create":
         mutation = f"""
         mutation cartCreate($input: CartInput) {{
@@ -478,6 +434,32 @@ async def tool_create_checkout(
     )
     cart = data.get("cartCreate", {}).get("cart", {})
     return {"checkoutUrl": cart.get("checkoutUrl"), "cartId": cart.get("id")}
+
+
+# ── goto_checkout ─────────────────────────────────────────────────────────────
+
+async def tool_goto_checkout(
+    client: ShopifyGraphQLClient,
+    cart_id: str | None = None,
+    **kwargs,
+) -> dict[str, Any]:
+    """Retrieve the checkout URL for the current cart."""
+    effective_cart_id = cart_id or kwargs.get("cart_id")
+    if not effective_cart_id:
+        return {"error": "No active cart found. Please add items to your cart first."}
+
+    query = f"""
+    query getCheckoutUrl($id: ID!) {{
+      cart(id: $id) {{ checkoutUrl }}
+    }}
+    """
+    data = await client.execute_storefront(query, {"id": effective_cart_id})
+    cart = data.get("cart")
+    
+    if not cart or not cart.get("checkoutUrl"):
+        return {"error": "Could not retrieve checkout URL for the current cart."}
+        
+    return {"checkoutUrl": cart.get("checkoutUrl")}
 
 
 # ── get_menu ──────────────────────────────────────────────────────────────────
