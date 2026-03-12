@@ -181,5 +181,6 @@ class PineconeSearchProvider(SearchProvider):
             latency_ms=latency_ms,
             pinecone_scores=scores[:10],  # store top 10
         )
-        logger.info(f"Pinecone search: '{query}' → {len(products)} results, top score={scores[0]:.3f if scores else 'n/a'}, latency={latency_ms}ms")
+        score_str = f"{scores[0]:.3f}" if scores else "n/a"
+        logger.info(f"Pinecone search: '{query}' → {len(products)} results, top score={score_str}, latency={latency_ms}ms")
         return products

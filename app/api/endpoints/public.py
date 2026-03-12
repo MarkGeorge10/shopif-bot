@@ -71,6 +71,21 @@ async def public_search_products(
     after: str | None = Query(None),
 ):
     client = await get_shop_connection_by_slug(slug)
+    store = await prisma.store.find_unique(where={"slug": slug})
+    
+    if store and store.enhanced_search_enabled:
+        from app.services.search.unified import unified_search
+        products = await unified_search(
+            store_id=store.id,
+            client=client,
+            query=q,
+            constraints={}
+        )
+        return ProductSearchResponse(
+            products=products,
+            page_info={"has_next_page": False, "end_cursor": None},
+        )
+    
     products_data = await repository.storefront_search_products(client, query=q, first=_PAGE_SIZE, after=after)
     return ProductSearchResponse(
         products=_parse_products(products_data.get("edges", [])),
@@ -141,11 +156,11 @@ async def public_visual_search(
         with open(file_path, "wb") as f:
             f.write(content)
             
-        # 2. Execute Multimodal Search
+        # 2. Execute Unified Multimodal Search
         client = await get_shop_connection_by_slug(slug)
-        provider = PineconeSearchProvider()
+        from app.services.search.unified import unified_search
         
-        products = await provider.search(
+        products = await unified_search(
             store_id=store.id,
             client=client,
             query=q,

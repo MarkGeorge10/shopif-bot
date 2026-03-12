@@ -182,6 +182,15 @@ CREATE_CHECKOUT = {
     },
 }
 
+GOTO_CHECKOUT = {
+    "name": "goto_checkout",
+    "description": "Get the direct checkout URL for the current shopping cart. Use this when the user is ready to pay for their items.",
+    "parameters": {
+        "type": Type.OBJECT,
+        "properties": {},
+    },
+}
+
 GET_MENU = {
     "name": "get_menu",
     "description": "Fetch the navigation menu structure of the store.",
@@ -257,6 +266,7 @@ ALL_TOOL_DECLARATIONS = [
     GET_PRODUCTS_IN_COLLECTION,
     MANAGE_CART,
     CREATE_CHECKOUT,
+    GOTO_CHECKOUT,
     GET_MENU,
     GET_ORDER_STATUS,
     GET_INVENTORY,
@@ -297,6 +307,7 @@ async def dispatch_tool_call(
         tool_get_products_in_collection,
         tool_manage_cart,
         tool_create_checkout,
+        tool_goto_checkout,
         tool_get_menu,
         tool_get_order_status,
         tool_get_inventory,
@@ -311,6 +322,7 @@ async def dispatch_tool_call(
         "get_products_in_collection": tool_get_products_in_collection,
         "manage_cart": tool_manage_cart,
         "create_checkout": tool_create_checkout,
+        "goto_checkout": tool_goto_checkout,
         "get_menu": tool_get_menu,
         "get_order_status": tool_get_order_status,
         "get_inventory": tool_get_inventory,
@@ -324,7 +336,7 @@ async def dispatch_tool_call(
 
     logger.info(
         "tool_call_dispatch",
-        extra={"tool": tool_name, "shop": client.shop_domain},
+        extra={"tool": tool_name, "shop": client.shop_domain, "tool_args": args},
     )
 
     try:
