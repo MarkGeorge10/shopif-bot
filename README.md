@@ -24,6 +24,12 @@ The intelligent brain of the **Shopify Live Concierge: The Multimodal AI Assista
 
 ---
 
+## 🏗️ System Architecture
+
+![Shopify Live Concierge Architecture](https://drive.google.com/file/d/1-EjdMATMGjvlVbebOMFtRiwoVUwZl6xN/view?usp=sharing)
+
+---
+
 ## 💻 Local Setup Instructions
 
 ### 1. Prerequisites
