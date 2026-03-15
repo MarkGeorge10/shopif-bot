@@ -84,3 +84,4 @@ uvicorn app.main:app --reload
 - `/app/services`: Core logic (Orchestrator, Search, RAG Evaluator).
 - `/app/tools`: Executable Shopify actions for the AI assistant.
 - `/prisma`: Database schema and migrations.
+## Check out UI Repo: https://github.com/MarkGeorge10/Shopify-store-ui-bot
