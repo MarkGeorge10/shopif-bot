@@ -17,7 +17,8 @@
 
 substitutions:
   _REGION: us-central1
-  _IMAGE: us-central1-docker.pkg.dev/shopify-concierge-prod/shopify-concierge/backend
+  # Updated to use Docker Hub as per the manual process (Local Build -> Docker Hub -> GCloud)
+  _IMAGE: docker.io/markgeorge10/shopify-ai-concierge-backend
   _TAG: "latest"
 
 steps:

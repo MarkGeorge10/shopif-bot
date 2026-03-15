@@ -1,115 +1,86 @@
 # Shopify Live Concierge: The Multimodal AI Assistant — Backend (FastAPI)
 
-[![Powered by Google Gemini](https://img.shields.io/badge/Powered%20by-Google%20Gemini-4285F4?logo=google-gemini&logoColor=white)](https://ai.google.dev/)
-[![GCP Cloud Run](https://img.shields.io/badge/Deployed%20to-Google%20Cloud%20Run-4285F4?logo=google-cloud&logoColor=white)](https://cloud.google.com/run)
+## 🏆 Gemini Live Agent Challenge Submission
 
-The intelligent brain of the **Shopify Live Concierge: The Multimodal AI Assistant**, a multimodal agentic system built for the **Gemini Live Agent Challenge**. This backend orchestrates real-time voice interactions, visual product search, and automated cart management using Google Gemini 2.0.
-
-## 🚀 Key Features
-
-- **Gemini Multimodal Live API**: Low-latency WebSocket relay for real-time voice interactions.
-- **Multimodal RAG Pipeline**: Product semantic search using CLIP embeddings and Pinecone Serverless.
-- **Shopify Agentic Tools**: Automated cart management, order tracking, and history-based personalization via Shopify GraphQL.
-- **RAG Monitoring & Evaluation**: Built-in metrics (NDCG, Hit Rate, MRR) and search logging to track retrieval quality.
-- **Security**: Fernet symmetric encryption for Shopify tokens at rest, integrated with GCP Secret Manager.
-
-## 🛠️ Technology Stack
-
-- **Framework**: FastAPI (Python 3.12)
-- **AI**: Gemini 2.0 Flash (Text/Vision) & Gemini 2.0 Flash-Live (Voice)
-- **Database**: PostgreSQL (Supabase) via Prisma Client Python
-- **Vector DB**: Pinecone Serverless (GRPC)
-- **Embeddings**: CLIP via HuggingFace Transformers
-- **Infrastructure**: Google Cloud Run, Cloud Build, Secret Manager
+### 🔑 Test Credentials (Judges)
+| Access Point | Username / Email | Password |
+| :--- | :--- | :--- |
+| **Merchant Dashboard** | `mark@example.com` | `12345678` |
+| **Shopify Checkout** | *(If prompted)* | `rteong` |
 
 ---
 
-## 🏗️ System Architecture
+## 1. Project Overview
+**Shopify Live Concierge** is a multimodal AI shopping assistant that transforms any Shopify store into an intelligent conversational shopping experience powered by **Google Gemini**.
 
-![Shopify Live Concierge Architecture](./docs/assets/architecture.png)
+The backend serves as the agentic orchestrator, coordinating between Gemini 2.0 Flash (Live), Shopify GraphQL APIs, and Pinecone vector search for a seamless, multimodal merchant experience.
+
+## 2. Key Features and Functionality
+
+### 2.1 Multimodal Reasoning
+- **Gemini 2.0 Flash**: Primary logic engine for text and image reasoning.
+- **Multimodal Live Relay**: Low-latency WebSocket handler for real-time voice (PCM 16-bit 16kHz).
+- **CLIP Embeddings**: Local embedding generation for visual product discovery.
+
+### 2.2 Agentic Shopify Integration
+The AI assistant is equipped with specialized tools for:
+- **Cart CRUD**: Automated shopping cart management via Storefront API.
+- **Order Tracking**: Retrieval of real-time fulfillment data via Admin API.
+- **Merchant Management**: Analytics, store indexing, and configuration logs.
+
+### 2.3 RAG Monitoring & Evaluation
+A dedicated evaluation engine calculates real-time quality metrics:
+- **NDCG** (Normalized Discounted Cumulative Gain)
+- **Hit Rate**
+- **Search Latency** (p50/p95 tracking)
+
+## 🛠️ Technology Stack
+- **Framework**: FastAPI (Python 3.12)
+- **Database**: PostgreSQL (Supabase) via Prisma Client Python
+- **Vector DB**: Pinecone Serverless
+- **Security**: Fernet symmetric encryption for tokens at rest
+- **Infrastructure**: Google Cloud Run, Secret Manager
 
 ---
 
 ## 💻 Local Setup Instructions
 
-### 1. Prerequisites
-- Python 3.11+
-- PostgreSQL database
-- Pinecone Account
-- Google AI Studio (Gemini) API Key
-
-### 2. Installation
+### 1. Installation
 ```bash
 # Clone the repository
-git clone <your-repo-url>
+git clone https://github.com/MarkGeorge10/shopif-bot
 cd shopify-ai-concierge-backend
 
-# Create and activate virtual environment
+# Setup environment
 python -m venv venv
 source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 3. Environment Variables
-Create a `.env` file in the root based on `.env.example`:
-```env
-# Database
-DATABASE_URL="postgresql://..."
-
-# Keys
-GEMINI_API_KEY="your-key"
-PINECONE_API_KEY="your-key"
-PINECONE_INDEX_NAME="shopify-ai-rag"
-FERNET_SECRET_KEY="generate-one-using-cryptography"
-JWT_SECRET_KEY="random-string"
-
-# Shopify (for dev)
-SHOPIFY_API_VERSION="2026-01"
-```
-
-### 4. Database Setup
+### 2. Database & RAG Setup
 ```bash
-# Push schema and generate Prisma client
+# Generate Prisma client and sync schema
 prisma db push
 prisma generate
 ```
 
-### 5. Run the Server
+### 3. Run the Server
 ```bash
 uvicorn app.main:app --reload
 ```
 
 ---
 
-## ☁️ Google Cloud Deployment
-
-The project is designed for **Google Cloud Run**. The `cloudbuild.yaml` file automates the containerization and deployment process, including secure secret injection from **Secret Manager**.
-
-### CI/CD Flow:
-1. Push to `main` branch.
-2. Cloud Build triggers.
-3. Secrets are pulled from GCP Secret Manager.
-4. Image is built and pushed to Artifact Registry.
-5. Service is deployed to Cloud Run with auto-scaling enabled.
+## ☁️ Google Cloud Deployment Proof
+- Deployed via **Google Cloud Build** to **Cloud Run**.
+- Uses **GCP Secret Manager** for encrypted runtime access to keys.
+- Demo Video: `google cloud run .mp4`
+- API Proof: `gemini api Key proof.mp4`
 
 ---
 
-## 🧪 Reproducible Testing (For Judges)
-
-### 1. Verification of Gemini Live API (Voice)
-To verify the real-time voice relay without a full Shopify store:
-1.  Ensure `GEMINI_API_KEY` is set in `.env`.
-2.  Start the server (`uvicorn app.main:app`).
-3.  The backend establishes a WebSocket relay at `/api/public/{slug}/live-relay`.
-4.  You can use the frontend "Concierge" mic button to initiate the PCM 16-bit 16kHz audio stream.
-5.  Check logs: You should see `[LiveRelay] Client connected` followed by `[LiveRelay] Sending setup to Gemini...`.
-
-### 2. Monitoring the RAG Evaluator
-1.  Perform any search on the storefront.
-2.  Navigate to the `/api/store/{store_id}/rag/metrics` endpoint (or use the Admin Dashboard).
-3.  Verify that it returns a JSON object with `ndcg`, `mrr`, and `hit_rate` calculated from your search events.
-
-### 3. Automated Deployment Proof
-Inspect `cloudbuild.yaml`. This file proves the infrastructure is "Reproducible" via code (IaC), managing the build, containerization, and secret injection from GCP Secret Manager automatically on every push to `main`.
+## 📂 Project Structure
+- `/app/api`: FastAPI routes (Public, Store, Chat).
+- `/app/services`: Core logic (Orchestrator, Search, RAG Evaluator).
+- `/app/tools`: Executable Shopify actions for the AI assistant.
+- `/prisma`: Database schema and migrations.
