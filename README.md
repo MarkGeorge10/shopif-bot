@@ -83,4 +83,24 @@ uvicorn app.main:app --reload
 - `/app/api`: FastAPI routes (Public, Store, Chat).
 - `/app/services`: Core logic (Orchestrator, Search, RAG Evaluator).
 - `/app/tools`: Executable Shopify actions for the AI assistant.
-- `/prisma`: Database schema and migrations.
+
+---
+
+## 🧪 Reproducible Testing (For Judges)
+
+### 1. Verification of Gemini Live API (Voice)
+1.  Ensure `GEMINI_API_KEY` is set in your environment.
+2.  The backend establishes a WebSocket relay at `/api/public/{slug}/live-relay`.
+3.  You can verify the relay by using the Frontend's microphone button; check backend logs for `[LiveRelay] Client connected`.
+
+### 2. Monitoring AI Performance (RAG Metrics)
+1.  Once a store is connected (e.g., using `mark@example.com` on the dashboard), perform a search on the storefront.
+2.  Visit the Merchant Dashboard.
+3.  **Expectation**: The "Analytics Performance" section will dynamically update with real-time NDCG and Accuracy metrics retrieved from the `/api/store/{store_id}/rag/metrics` endpoint.
+
+### 3. Automated Cloud Deployment Proof
+Inspect `cloudbuild.yaml`. This file defines the automated pipeline for:
+- Docker Hub image pushing.
+- Automated deployment to Google Cloud Run.
+- Secure secret injection from GCP Secret Manager.
+
